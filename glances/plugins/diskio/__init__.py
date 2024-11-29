@@ -9,10 +9,31 @@
 """Disk I/O plugin."""
 
 import psutil
-
+import time
 from glances.globals import nativestr
 from glances.logger import logger
 from glances.plugins.plugin.model import GlancesPluginModel
+from glances.plugins.nvme_detection import NVMeDetection
+
+
+
+import logging
+
+# Configure a separate logger for NVMe detection
+nvme_logger = logging.getLogger("nvme_logger")
+nvme_logger.setLevel(logging.INFO)
+
+# Create a file handler for the NVMe log file
+nvme_log_file = "nvme.log"
+file_handler = logging.FileHandler(nvme_log_file)
+file_handler.setLevel(logging.INFO)
+
+# Create a formatter and add it to the handler
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+
+# Add the handler to the logger
+nvme_logger.addHandler(file_handler)
 
 # Fields description
 # description: human readable description
@@ -67,6 +88,9 @@ class PluginModel(GlancesPluginModel):
             fields_description=fields_description,
         )
 
+        # Initialize NVMeDetection
+        self.nvme_detector = NVMeDetection()
+
         # We want to display the stat in the curse interface
         self.display_curse = True
 
@@ -109,31 +133,42 @@ class PluginModel(GlancesPluginModel):
         except Exception:
             return stats
 
-        for disk_name, disk_stat in diskio.items():
-            # By default, RamFS is not displayed (issue #714)
-            if self.args is not None and not self.args.diskio_show_ramfs and disk_name.startswith('ram'):
-                continue
+        # Initialize NVMeDetection
+        nvme_detector = NVMeDetection()
+        nvme_drives = nvme_detector.list_nvme_drives()
 
-            # Shall we display the stats ?
-            if not self.is_display(disk_name):
-                continue
+        # Log NVMe detection only once or if changes are detected
+        if hasattr(self, 'previous_nvme_drives') and self.previous_nvme_drives != nvme_drives:
+            if nvme_drives:
+                nvme_logger.info("NVMe Drives Detected:")
+                for drive in nvme_drives:
+                    nvme_logger.info(f" - DeviceID: {drive['DeviceID']}, Model: {drive['Model']}, Size: {drive['Size']} GB")
+            else:
+                nvme_logger.info("No NVMe drives detected.")
+        self.previous_nvme_drives = nvme_drives
 
-            # Filter stats to keep only the fields we want (define in fields_description)
-            # It will also convert psutil objects to a standard Python dict
-            stat = self.filter_stats(disk_stat)
-
-            # Add the key
-            stat['key'] = self.get_key()
-
-            # Add disk name
-            stat['disk_name'] = disk_name
-
-            # Add alias if exist (define in the configuration file)
-            if self.has_alias(disk_name) is not None:
-                stat['alias'] = self.has_alias(disk_name)
-
+        # Add NVMe drives to stats
+        for nvme_drive in nvme_drives:
+            stat = {
+                'key': self.get_key(),
+                'disk_name': nvme_drive['Model'],
+                'read_bytes': 0,  # Placeholder
+                'write_bytes': 0,  # Placeholder
+                'read_count': 0,
+                'write_count': 0,
+            }
             stats.append(stat)
 
+        # Process regular disks
+        for disk_name, disk_stat in diskio.items():
+            if self.args is not None and not self.args.diskio_show_ramfs and disk_name.startswith('ram'):
+                continue
+            if not self.is_display(disk_name):
+                continue
+            stat = self.filter_stats(disk_stat)
+            stat['key'] = self.get_key()
+            stat['disk_name'] = disk_name
+            stats.append(stat)
         return stats
 
     def update_views(self):
