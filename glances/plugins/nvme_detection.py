@@ -29,6 +29,24 @@ class NVMeDetection:
             self.detect_nvme_drives()
         return self.nvme_drives
 
+def get_nvme_health_metrics(device_id):
+    import wmi
+    c = wmi.WMI()
+
+    try:
+        for disk in c.Win32_DiskDrive():
+            if disk.DeviceID == device_id:
+                # Placeholder health status and temperature
+                health_status = "Healthy"  # Use vendor-specific tools for more detail
+                temperature = None  # Actual temperature query may require external tools
+
+                return {
+                    "health_status": health_status,
+                    "temperature": temperature
+                }
+    except Exception as e:
+        print(f"Error retrieving NVMe health metrics: {e}")
+        return None
 
 # Example usage for testing
 if __name__ == "__main__":
